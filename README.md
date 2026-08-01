@@ -26,6 +26,8 @@ npm run build
 npm run preview
 ```
 
+仓库包含 GitHub Pages 部署工作流。私有仓库需要支持 Pages 的 GitHub 套餐；也可以在确认后把仓库设为公开，再手动运行 `Deploy to GitHub Pages`。
+
 ## 用脚本切换默认主题
 
 主题包只改变颜色、载具、角色称呼和界面文案，不修改关卡与学习记录。
