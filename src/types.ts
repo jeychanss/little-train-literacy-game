@@ -4,9 +4,11 @@ export type View = "home" | "map" | "learn" | "play" | "complete" | "parent";
 
 export interface WordCard {
   char: string;
+  word: string;
+  sentence: string;
   hint: string;
   emoji: string;
-  phrase: string;
+  category: string;
 }
 
 export interface Level {
@@ -30,4 +32,5 @@ export interface SaveData {
   unlockedLevelIds: string[];
   results: Record<string, LevelResult>;
   totalWords: number;
+  levelOverrides?: Record<string, string[]>;
 }

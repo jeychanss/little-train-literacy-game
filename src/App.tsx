@@ -5,7 +5,8 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { levels } from "./data/levels";
+import { buildLevels, defaultLevelCharacters, levels } from "./data/levels";
+import { wordBank, wordCategories } from "./data/wordBank";
 import { scriptedDefaultTheme, themes } from "./themes";
 import type { Level, SaveData, ThemeId, View, WordCard } from "./types";
 
@@ -50,6 +51,10 @@ function serializeSave(save: SaveData) {
   Object.entries(save.results).forEach(([id, result]) => {
     lines.push(`${id}|${result.stars}|${result.mistakes}|${result.completedAt}`);
   });
+  lines.push("关卡字库:");
+  Object.entries(save.levelOverrides ?? {}).forEach(([id, chars]) => {
+    lines.push(`关卡字|${id}|${chars.join(",")}`);
+  });
   return lines.join("\n");
 }
 
@@ -71,9 +76,10 @@ function parseSave(text: string): SaveData {
     .filter((id) => levels.some((level) => level.id === id));
   const totalWords = Number(getValue("累计识字") ?? 0);
   const results: SaveData["results"] = {};
+  const levelOverrides: Record<string, string[]> = {};
 
   lines
-    .filter((line) => line.includes("|") && !line.includes("="))
+    .filter((line) => levels.some((level) => line.startsWith(`${level.id}|`)))
     .forEach((line) => {
       const [id, starsText, mistakesText, completedAt] = line.split("|");
       if (!levels.some((level) => level.id === id)) return;
@@ -81,6 +87,22 @@ function parseSave(text: string): SaveData {
       const mistakes = Number(mistakesText);
       if (![1, 2, 3].includes(stars) || !Number.isFinite(mistakes)) return;
       results[id] = { stars, mistakes, completedAt: completedAt || new Date().toISOString() };
+    });
+
+  lines
+    .filter((line) => line.startsWith("关卡字|"))
+    .forEach((line) => {
+      const [, id, charText] = line.split("|");
+      const chars = (charText ?? "").split(",").filter(Boolean);
+      if (
+        levels.some((level) => level.id === id) &&
+        chars.length >= 3 &&
+        chars.length <= 5 &&
+        new Set(chars).size === chars.length &&
+        chars.every((char) => wordBank.some((entry) => entry.char === char))
+      ) {
+        levelOverrides[id] = chars;
+      }
     });
 
   if (!levels.some((level) => level.id === selectedLevelId)) {
@@ -93,6 +115,7 @@ function parseSave(text: string): SaveData {
     unlockedLevelIds: unlockedLevelIds.length ? unlockedLevelIds : [levels[0].id],
     results,
     totalWords: Number.isFinite(totalWords) ? Math.max(0, totalWords) : 0,
+    levelOverrides,
   };
 }
 
@@ -106,25 +129,76 @@ function speak(text: string, rate = 0.72) {
   window.speechSynthesis.speak(utterance);
 }
 
-function playTone(kind: "good" | "try") {
+let sharedAudioContext: AudioContext | null = null;
+
+function playTone(kind: "good" | "try" | "complete") {
   try {
-    const context = new AudioContext();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.type = kind === "good" ? "sine" : "triangle";
-    oscillator.frequency.setValueAtTime(kind === "good" ? 523 : 210, context.currentTime);
-    if (kind === "good") {
-      oscillator.frequency.linearRampToValueAtTime(784, context.currentTime + 0.16);
-    }
-    gain.gain.setValueAtTime(0.12, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.25);
-    oscillator.start();
-    oscillator.stop(context.currentTime + 0.25);
+    sharedAudioContext ??= new AudioContext();
+    const context = sharedAudioContext;
+    if (context.state === "suspended") void context.resume();
+    const notes =
+      kind === "good"
+        ? [{ frequency: 523, at: 0 }, { frequency: 659, at: 0.1 }, { frequency: 784, at: 0.2 }]
+        : kind === "try"
+          ? [{ frequency: 330, at: 0 }, { frequency: 247, at: 0.16 }]
+          : [
+              { frequency: 523, at: 0 },
+              { frequency: 659, at: 0.12 },
+              { frequency: 784, at: 0.24 },
+              { frequency: 1047, at: 0.39 },
+              { frequency: 1319, at: 0.56 },
+            ];
+
+    notes.forEach(({ frequency, at }, index) => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = kind === "try" ? "triangle" : index % 2 ? "sine" : "triangle";
+      oscillator.frequency.setValueAtTime(frequency, context.currentTime + at);
+      gain.gain.setValueAtTime(0.0001, context.currentTime + at);
+      gain.gain.exponentialRampToValueAtTime(kind === "complete" ? 0.15 : 0.12, context.currentTime + at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + at + 0.2);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(context.currentTime + at);
+      oscillator.stop(context.currentTime + at + 0.22);
+    });
   } catch {
     // Audio is a reward enhancement; the game remains fully usable without it.
   }
+}
+
+function randomIndex(max: number) {
+  if (max <= 1) return 0;
+  if ("crypto" in window && window.crypto.getRandomValues) {
+    const value = new Uint32Array(1);
+    window.crypto.getRandomValues(value);
+    return value[0] % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
+function shuffled<T>(items: T[]) {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomIndex(index + 1);
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+  return copy;
+}
+
+function createQuizOrders(words: WordCard[]) {
+  let previousAnswerPosition = -1;
+  return words.map((answer) => {
+    const order = shuffled(words);
+    let answerPosition = order.findIndex((word) => word.char === answer.char);
+    if (answerPosition === previousAnswerPosition && order.length > 1) {
+      const swapPosition = (answerPosition + 1 + randomIndex(order.length - 1)) % order.length;
+      [order[answerPosition], order[swapPosition]] = [order[swapPosition], order[answerPosition]];
+      answerPosition = swapPosition;
+    }
+    previousAnswerPosition = answerPosition;
+    return order.map((word) => word.char);
+  });
 }
 
 function App() {
@@ -135,11 +209,13 @@ function App() {
   const [quizIndex, setQuizIndex] = useState(0);
   const [mistakes, setMistakes] = useState(0);
   const [loadedChars, setLoadedChars] = useState<string[]>([]);
+  const [choiceOrders, setChoiceOrders] = useState<string[][]>([]);
   const [feedback, setFeedback] = useState<"idle" | "good" | "try">("idle");
 
   const theme = themes[themeId];
+  const activeLevels = useMemo(() => buildLevels(save.levelOverrides), [save.levelOverrides]);
   const selectedLevel =
-    levels.find((level) => level.id === save.selectedLevelId) ?? levels[0];
+    activeLevels.find((level) => level.id === save.selectedLevelId) ?? activeLevels[0];
 
   useEffect(() => {
     localStorage.setItem(SAVE_KEY, JSON.stringify(save));
@@ -173,6 +249,7 @@ function App() {
     setQuizIndex(0);
     setMistakes(0);
     setLoadedChars([]);
+    setChoiceOrders(createQuizOrders(selectedLevel.words));
     setFeedback("idle");
     navigate("play");
     window.setTimeout(() => speak(selectedLevel.words[0].char), 220);
@@ -180,7 +257,7 @@ function App() {
 
   function finishLevel(finalMistakes: number) {
     const stars = finalMistakes === 0 ? 3 : finalMistakes <= 2 ? 2 : 1;
-    const nextLevel = levels[selectedLevel.number];
+    const nextLevel = activeLevels[selectedLevel.number];
     setSave((current) => {
       const previous = current.results[selectedLevel.id];
       const bestResult =
@@ -196,7 +273,8 @@ function App() {
         totalWords: current.totalWords + selectedLevel.words.length,
       };
     });
-    playTone("good");
+    playTone("complete");
+    window.setTimeout(() => speak("太棒了，闯关成功！"), 680);
     navigate("complete");
   }
 
@@ -207,13 +285,15 @@ function App() {
       setMistakes((count) => count + 1);
       setFeedback("try");
       playTone("try");
-      window.setTimeout(() => setFeedback("idle"), 650);
+      speak("再试一次");
+      window.setTimeout(() => setFeedback("idle"), 760);
       return;
     }
 
     setLoadedChars((chars) => [...chars, card.char]);
     setFeedback("good");
     playTone("good");
+    speak("答对啦");
     const isLast = quizIndex === selectedLevel.words.length - 1;
     window.setTimeout(() => {
       if (isLast) {
@@ -224,11 +304,21 @@ function App() {
         setFeedback("idle");
         speak(selectedLevel.words[nextIndex].char);
       }
-    }, 700);
+    }, 820);
   }
 
   function changeTheme(id: ThemeId) {
     setThemeId(id);
+  }
+
+  function updateLevelCharacters(levelId: string, chars: string[]) {
+    setSave((current) => ({
+      ...current,
+      levelOverrides: {
+        ...(current.levelOverrides ?? {}),
+        [levelId]: chars,
+      },
+    }));
   }
 
   const shellStyle = theme.css as CSSProperties;
@@ -256,6 +346,7 @@ function App() {
           <MapView
             title={theme.mapTitle}
             save={save}
+            levelsList={activeLevels}
             onSelect={selectLevel}
             onParent={() => navigate("parent")}
           />
@@ -279,6 +370,7 @@ function App() {
             questionIndex={quizIndex}
             loadedChars={loadedChars}
             feedback={feedback}
+            choiceOrder={choiceOrders[quizIndex] ?? selectedLevel.words.map((word) => word.char)}
             vehicleLabel={theme.vehicleLabel}
             onChoose={chooseCharacter}
             onReplay={() => speak(selectedLevel.words[quizIndex].char)}
@@ -297,9 +389,11 @@ function App() {
         {view === "parent" && (
           <ParentView
             save={save}
+            levelsList={activeLevels}
             themeId={themeId}
             onThemeChange={changeTheme}
             onChooseLevel={(level) => selectLevel(level, true)}
+            onUpdateLevel={updateLevelCharacters}
             onImport={setSave}
             onBack={() => navigate("home")}
           />
@@ -418,11 +512,13 @@ function PictureBookScene({ themeId }: { themeId: ThemeId }) {
 function MapView({
   title,
   save,
+  levelsList,
   onSelect,
   onParent,
 }: {
   title: string;
   save: SaveData;
+  levelsList: Level[];
   onSelect: (level: Level) => void;
   onParent: () => void;
 }) {
@@ -434,15 +530,15 @@ function MapView({
           <p className="eyebrow">识字路线图</p>
           <h1>{title}</h1>
         </div>
-        <div className="progress-badge"><b>{completed}</b><span>/ {levels.length} 站完成</span></div>
+        <div className="progress-badge"><b>{completed}</b><span>/ {levelsList.length} 站完成</span></div>
       </div>
       <div className="route" aria-label="关卡列表">
-        {levels.map((level, index) => {
+        {levelsList.map((level, index) => {
           const unlocked = save.unlockedLevelIds.includes(level.id);
           const result = save.results[level.id];
           return (
             <div className={`route-stop ${index % 2 ? "right" : "left"}`} key={level.id}>
-              {index < levels.length - 1 && <span className="route-line" aria-hidden="true" />}
+              {index < levelsList.length - 1 && <span className="route-line" aria-hidden="true" />}
               <button
                 className={`station-card ${unlocked ? "unlocked" : "locked"}`}
                 onClick={() => onSelect(level)}
@@ -498,12 +594,12 @@ function LearnView({
         </div>
         <article className="character-card">
           <span className="card-emoji" aria-hidden="true">{word.emoji}</span>
-          <button className="character" onClick={() => speak(`${word.char}，${word.phrase}`)} aria-label={`朗读汉字${word.char}`}>
+          <button className="character" onClick={() => speak(`${word.char}。${word.word}。${word.sentence}`)} aria-label={`朗读汉字${word.char}`}>
             {word.char}
           </button>
-          <p className="phrase">{word.phrase}</p>
-          <p className="hint">{word.hint}</p>
-          <button className="listen-button" onClick={() => speak(`${word.char}，${word.phrase}`)}>
+          <p className="phrase">{word.word}</p>
+          <p className="hint">{word.sentence}</p>
+          <button className="listen-button" onClick={() => speak(`${word.char}。${word.word}。${word.sentence}`)}>
             <span aria-hidden="true">🔊</span> 听一听
           </button>
         </article>
@@ -524,6 +620,7 @@ function PlayView({
   questionIndex,
   loadedChars,
   feedback,
+  choiceOrder,
   vehicleLabel,
   onChoose,
   onReplay,
@@ -533,16 +630,16 @@ function PlayView({
   questionIndex: number;
   loadedChars: string[];
   feedback: "idle" | "good" | "try";
+  choiceOrder: string[];
   vehicleLabel: string;
   onChoose: (word: WordCard) => void;
   onReplay: () => void;
   onExit: () => void;
 }) {
   const answer = level.words[questionIndex];
-  const choices = useMemo(() => {
-    const shift = questionIndex % level.words.length;
-    return [...level.words.slice(shift), ...level.words.slice(0, shift)];
-  }, [level, questionIndex]);
+  const choices = choiceOrder
+    .map((char) => level.words.find((word) => word.char === char))
+    .filter((word): word is WordCard => Boolean(word));
 
   return (
     <section className="screen play-screen">
@@ -623,16 +720,20 @@ function CompleteView({
 
 function ParentView({
   save,
+  levelsList,
   themeId,
   onThemeChange,
   onChooseLevel,
+  onUpdateLevel,
   onImport,
   onBack,
 }: {
   save: SaveData;
+  levelsList: Level[];
   themeId: ThemeId;
   onThemeChange: (id: ThemeId) => void;
   onChooseLevel: (level: Level) => void;
+  onUpdateLevel: (levelId: string, chars: string[]) => void;
   onImport: (save: SaveData) => void;
   onBack: () => void;
 }) {
@@ -681,7 +782,7 @@ function ParentView({
       </div>
 
       <div className="summary-grid">
-        <SummaryCard icon="🏁" value={`${completed}/${levels.length}`} label="完成关卡" />
+        <SummaryCard icon="🏁" value={`${completed}/${levelsList.length}`} label="完成关卡" />
         <SummaryCard icon="⭐" value={String(stars)} label="获得星星" />
         <SummaryCard icon="字" value={String(save.totalWords)} label="累计练习" />
       </div>
@@ -691,7 +792,7 @@ function ParentView({
           <div><h2>手动选择关卡</h2><p>可以跳过路线锁定，从任意内容开始学习。</p></div>
         </div>
         <div className="level-picker">
-          {levels.map((level) => (
+          {levelsList.map((level) => (
             <button className="level-pick" onClick={() => onChooseLevel(level)} key={level.id}>
               <span style={{ background: level.color }}>{level.number}</span>
               <b>{level.title}</b>
@@ -700,6 +801,8 @@ function ParentView({
           ))}
         </div>
       </section>
+
+      <WordLibraryPanel levelsList={levelsList} onUpdateLevel={onUpdateLevel} />
 
       <section className="parent-panel">
         <div className="panel-heading">
@@ -736,6 +839,121 @@ function ParentView({
           <button className="primary-button" onClick={importRecord}>从文本导入</button>
         </div>
       </section>
+    </section>
+  );
+}
+
+function WordLibraryPanel({
+  levelsList,
+  onUpdateLevel,
+}: {
+  levelsList: Level[];
+  onUpdateLevel: (levelId: string, chars: string[]) => void;
+}) {
+  const [editingLevelId, setEditingLevelId] = useState(levelsList[0].id);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("全部");
+  const [libraryMessage, setLibraryMessage] = useState("每关可选择 3–5 个字，点击汉字即可增删。");
+  const editingLevel = levelsList.find((level) => level.id === editingLevelId) ?? levelsList[0];
+  const selectedChars = editingLevel.words.map((word) => word.char);
+  const filteredWords = useMemo(() => {
+    const keyword = query.trim();
+    return wordBank.filter(
+      (entry) =>
+        (category === "全部" || entry.category === category) &&
+        (!keyword || entry.char.includes(keyword) || entry.word.includes(keyword) || entry.sentence.includes(keyword)),
+    );
+  }, [category, query]);
+
+  function toggleCharacter(char: string) {
+    const selected = selectedChars.includes(char);
+    if (selected && selectedChars.length <= 3) {
+      setLibraryMessage("每关至少保留 3 个字。");
+      return;
+    }
+    if (!selected && selectedChars.length >= 5) {
+      setLibraryMessage("每关最多选择 5 个字，请先移除一个。");
+      return;
+    }
+    const next = selected ? selectedChars.filter((item) => item !== char) : [...selectedChars, char];
+    onUpdateLevel(editingLevel.id, next);
+    setLibraryMessage(`已保存：${editingLevel.station}现在学习 ${next.join("、")}。`);
+  }
+
+  function restoreDefault() {
+    const defaultChars = defaultLevelCharacters[editingLevel.id];
+    onUpdateLevel(editingLevel.id, [...defaultChars]);
+    setLibraryMessage(`${editingLevel.station}已恢复默认字。`);
+  }
+
+  return (
+    <section className="parent-panel word-library-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>推荐启蒙字库</h2>
+          <p>内置 {wordBank.length} 个生活常见字，可随时调整每一关；以亲子游戏和阅读兴趣为主，不作为入学考试标准。</p>
+        </div>
+        <button className="paper-button compact" onClick={restoreDefault}>恢复本关默认</button>
+      </div>
+
+      <div className="level-editor-tabs" aria-label="选择要编辑的关卡">
+        {levelsList.map((level) => (
+          <button
+            className={editingLevel.id === level.id ? "active" : ""}
+            onClick={() => {
+              setEditingLevelId(level.id);
+              setLibraryMessage(`正在编辑：${level.station}`);
+            }}
+            key={level.id}
+          >
+            {level.number}. {level.title}
+          </button>
+        ))}
+      </div>
+
+      <div className="selected-characters">
+        <div><b>{editingLevel.station}</b><small>已选 {selectedChars.length}/5</small></div>
+        <div>
+          {selectedChars.map((char) => (
+            <button onClick={() => toggleCharacter(char)} aria-label={`从本关移除${char}`} key={char}>
+              {char}<span aria-hidden="true">×</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="library-tools">
+        <label>
+          <span>搜索汉字、词语或例句</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="例如：雨、朋友、吃饭" />
+        </label>
+        <label>
+          <span>主题分类</span>
+          <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            {wordCategories.map((item) => <option value={item} key={item}>{item}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <p className="library-message" role="status">{libraryMessage}</p>
+      <div className="word-bank-grid" aria-label="可选汉字">
+        {filteredWords.map((entry) => {
+          const selected = selectedChars.includes(entry.char);
+          return (
+            <button
+              className={selected ? "selected" : ""}
+              onClick={() => toggleCharacter(entry.char)}
+              aria-pressed={selected}
+              title={`${entry.word}：${entry.sentence}`}
+              key={entry.char}
+            >
+              <strong>{entry.char}</strong>
+              <span>{entry.word}</span>
+            </button>
+          );
+        })}
+      </div>
+      {!filteredWords.length && <p className="empty-library">没有找到相符的字，换个关键词试试。</p>}
     </section>
   );
 }
