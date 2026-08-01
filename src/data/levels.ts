@@ -1,0 +1,108 @@
+import type { Level } from "../types";
+
+export const levels: Level[] = [
+  {
+    id: "home",
+    number: 1,
+    station: "暖暖家园站",
+    title: "我的家",
+    color: "#F2A65A",
+    words: [
+      { char: "人", hint: "一个人", emoji: "🧒", phrase: "家里的人" },
+      { char: "口", hint: "小嘴巴", emoji: "👄", phrase: "张开小口" },
+      { char: "手", hint: "拍拍手", emoji: "🖐️", phrase: "我的小手" },
+      { char: "大", hint: "张开手臂", emoji: "🙆", phrase: "大大的家" },
+    ],
+  },
+  {
+    id: "nature",
+    number: 2,
+    station: "青草坡站",
+    title: "大自然",
+    color: "#7FAF72",
+    words: [
+      { char: "山", hint: "高高的山", emoji: "⛰️", phrase: "山上有树" },
+      { char: "水", hint: "流动的水", emoji: "💧", phrase: "清清的水" },
+      { char: "木", hint: "一棵树", emoji: "🌳", phrase: "木头小桥" },
+      { char: "火", hint: "暖暖的火", emoji: "🔥", phrase: "小心火苗" },
+    ],
+  },
+  {
+    id: "sky",
+    number: 3,
+    station: "云朵山站",
+    title: "抬头看",
+    color: "#6FA9C7",
+    words: [
+      { char: "日", hint: "太阳公公", emoji: "☀️", phrase: "红日升起" },
+      { char: "月", hint: "弯弯月亮", emoji: "🌙", phrase: "月亮晚安" },
+      { char: "天", hint: "蓝蓝天空", emoji: "🌤️", phrase: "今天晴朗" },
+      { char: "云", hint: "软软云朵", emoji: "☁️", phrase: "白云飘飘" },
+    ],
+  },
+  {
+    id: "animals",
+    number: 4,
+    station: "动物朋友站",
+    title: "好朋友",
+    color: "#D9897E",
+    words: [
+      { char: "鸟", hint: "飞上天空", emoji: "🐦", phrase: "小鸟唱歌" },
+      { char: "鱼", hint: "水里游泳", emoji: "🐟", phrase: "鱼儿游游" },
+      { char: "马", hint: "跑得快快", emoji: "🐴", phrase: "小马快跑" },
+      { char: "牛", hint: "哞哞叫", emoji: "🐮", phrase: "小牛吃草" },
+    ],
+  },
+  {
+    id: "numbers",
+    number: 5,
+    station: "数数桥站",
+    title: "一起来数",
+    color: "#BE8CBF",
+    words: [
+      { char: "一", hint: "一根横线", emoji: "1️⃣", phrase: "一朵小花" },
+      { char: "二", hint: "两根横线", emoji: "2️⃣", phrase: "二只小鸟" },
+      { char: "三", hint: "三根横线", emoji: "3️⃣", phrase: "三颗星星" },
+      { char: "十", hint: "十字路口", emoji: "🔟", phrase: "十个朋友" },
+    ],
+  },
+  {
+    id: "directions",
+    number: 6,
+    station: "方向谷站",
+    title: "去哪里",
+    color: "#D7A148",
+    words: [
+      { char: "上", hint: "向上走", emoji: "⬆️", phrase: "上车出发" },
+      { char: "下", hint: "向下看", emoji: "⬇️", phrase: "下车休息" },
+      { char: "左", hint: "左边看看", emoji: "⬅️", phrase: "向左转弯" },
+      { char: "右", hint: "右边看看", emoji: "➡️", phrase: "向右前进" },
+    ],
+  },
+  {
+    id: "school",
+    number: 7,
+    station: "彩笔学校站",
+    title: "学习用品",
+    color: "#5FA7A0",
+    words: [
+      { char: "本", hint: "一本图书", emoji: "📖", phrase: "打开书本" },
+      { char: "笔", hint: "画一画", emoji: "✏️", phrase: "拿好铅笔" },
+      { char: "纸", hint: "白白的纸", emoji: "📄", phrase: "一张白纸" },
+      { char: "字", hint: "认真写字", emoji: "📝", phrase: "我会写字" },
+    ],
+  },
+  {
+    id: "feelings",
+    number: 8,
+    station: "星光终点站",
+    title: "快乐一天",
+    color: "#E17C66",
+    words: [
+      { char: "笑", hint: "笑一笑", emoji: "😊", phrase: "开心地笑" },
+      { char: "爱", hint: "暖暖的心", emoji: "❤️", phrase: "我爱家人" },
+      { char: "好", hint: "真棒真好", emoji: "👍", phrase: "今天真好" },
+      { char: "乐", hint: "快乐出发", emoji: "🎈", phrase: "快乐成长" },
+    ],
+  },
+];
